@@ -8,6 +8,25 @@ ERROR_PATTERN = re.compile(
     r"\b(ERROR|CRITICAL|FATAL|Exception|Traceback|panic:|FAIL(ED)?)\b", re.IGNORECASE
 )
 
+# Patterns for common secret shapes that shouldn't leave the machine.
+# Deliberately conservative (over-redact rather than under-redact).
+SECRET_PATTERNS = [
+    re.compile(r"(api[_-]?key|secret|token|password|passwd|auth)\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"Bearer\s+[A-Za-z0-9\-_.]+"),
+    re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"),                  # generic "sk-" style API keys
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),                      # AWS access key IDs
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),            # GitHub tokens
+    re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),  # JWTs
+    re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"),              # email addresses
+]
+
+
+def _redact(text: str) -> str:
+    """Strip likely secrets/PII from text before it leaves the machine."""
+    for pattern in SECRET_PATTERNS:
+        text = pattern.sub("[REDACTED]", text)
+    return text
+
 
 def _tail_lines(path: Path, n: int) -> list[str]:
     with path.open(errors="ignore") as f:
@@ -37,14 +56,29 @@ def _plain_summary(error_lines: list[str]) -> str:
     return "\n".join(parts)
 
 
-def _ai_summary(error_lines: list[str]) -> str | None:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+def _ai_summary(error_lines: list[str], assume_yes: bool, model: str) -> str | None:
+    api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         return None
 
     import requests
 
-    excerpt = "\n".join(error_lines[-200:])
+    raw_excerpt = "\n".join(error_lines[-200:])
+    excerpt = _redact(raw_excerpt)
+
+    if excerpt != raw_excerpt and not assume_yes:
+        print("Some lines look like they contain secrets/credentials/emails.")
+        print("These have been redacted, but the remaining log text will still be")
+        print("sent to Groq's API (api.groq.com).")
+        reply = input("Continue? [y/N] ").strip().lower()
+        if reply not in ("y", "yes"):
+            return "(AI summary skipped by user.)"
+    elif not assume_yes:
+        print("Log excerpt will be sent to Groq's API (api.groq.com) for summarization.")
+        reply = input("Continue? [y/N] ").strip().lower()
+        if reply not in ("y", "yes"):
+            return "(AI summary skipped by user.)"
+
     prompt = (
         "Here are error/warning lines pulled from a log file. In under 150 words, "
         "explain in plain English what's likely going wrong and suggest what to check first:\n\n"
@@ -52,28 +86,48 @@ def _ai_summary(error_lines: list[str]) -> str | None:
     )
     try:
         resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
+            "https://api.groq.com/openai/v1/chat/completions",
             headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
+                "Authorization": f"Bearer {api_key}",
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-sonnet-4-6",
+                "model": model,
                 "max_tokens": 400,
                 "messages": [{"role": "user", "content": prompt}],
             },
-            timeout=20,
+            timeout=30,
         )
         resp.raise_for_status()
         data = resp.json()
-        text_blocks = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
-        return "\n".join(text_blocks) if text_blocks else None
-    except Exception as e:  # noqa: BLE001
-        return f"(AI summary failed: {e})"
+        choices = data.get("choices", [])
+        if not choices:
+            return None
+        return choices[0].get("message", {}).get("content") or None
+    except requests.exceptions.Timeout:
+        return "(AI summary failed: request timed out)"
+    except requests.exceptions.ConnectionError:
+        return "(AI summary failed: could not connect to api.groq.com)"
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else "?"
+        detail = ""
+        if e.response is not None:
+            try:
+                detail = f" ({e.response.json().get('error', {}).get('message', '')})"
+            except ValueError:
+                pass
+        return f"(AI summary failed: Groq API returned HTTP {status}{detail})"
+    except (ValueError, KeyError):
+        return "(AI summary failed: unexpected response format)"
 
 
-def run(log_path: str, lines: int, use_ai: bool) -> None:
+def run(
+    log_path: str,
+    lines: int,
+    use_ai: bool,
+    assume_yes: bool = False,
+    model: str = "llama-3.3-70b-versatile",
+) -> None:
     path = Path(log_path)
     if not path.exists():
         print(f"No such file: {log_path}")
@@ -86,12 +140,12 @@ def run(log_path: str, lines: int, use_ai: bool) -> None:
     print()
 
     if use_ai:
-        ai_result = _ai_summary(error_lines)
+        ai_result = _ai_summary(error_lines, assume_yes, model)
         if ai_result:
             print("AI summary:")
             print(ai_result)
             return
-        print("(No ANTHROPIC_API_KEY set or AI call failed — falling back to plain summary)")
+        print("(No GROQ_API_KEY set, call failed, or was skipped — falling back to plain summary)")
         print()
 
     print(_plain_summary(error_lines))

@@ -49,10 +49,12 @@ def deadcode(project_path):
 @cli.command()
 @click.argument("log_path")
 @click.option("--lines", "-n", default=500, help="How many trailing lines to scan.")
-@click.option("--ai", "use_ai", is_flag=True, help="Summarize via Claude (needs ANTHROPIC_API_KEY).")
-def logwatch(log_path, lines, use_ai):
+@click.option("--ai", "use_ai", is_flag=True, help="Summarize via Groq (free tier, needs GROQ_API_KEY).")
+@click.option("--yes", "-y", "assume_yes", is_flag=True, help="Skip the confirmation prompt before sending log data to the AI.")
+@click.option("--model", default="llama-3.3-70b-versatile", help="Groq model to use.")
+def logwatch(log_path, lines, use_ai, assume_yes, model):
     """Scan a log file for errors and summarize them."""
-    logwatch_mod.run(log_path, lines, use_ai)
+    logwatch_mod.run(log_path, lines, use_ai, assume_yes, model)
 
 
 @cli.command()

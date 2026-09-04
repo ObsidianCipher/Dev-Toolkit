@@ -1,5 +1,7 @@
 """devkit portfolio — pull a GitHub user's repos, rank them, and format a portfolio blurb."""
 import os
+from urllib.parse import quote
+
 import requests
 
 
@@ -9,11 +11,12 @@ def _fetch_repos(username: str) -> list[dict]:
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
+    safe_username = quote(username, safe="")
     repos = []
     page = 1
     while True:
         resp = requests.get(
-            f"https://api.github.com/users/{username}/repos",
+            f"https://api.github.com/users/{safe_username}/repos",
             headers=headers,
             params={"per_page": 100, "page": page, "type": "owner"},
             timeout=15,

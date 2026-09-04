@@ -1,7 +1,13 @@
 """devkit envcheck — find required env vars, compare to what's set, scaffold .env."""
+import getpass
 import re
 import sys
 from pathlib import Path
+
+# Var-name patterns that suggest a secret — input for these is masked.
+SECRET_NAME_PATTERN = re.compile(
+    r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|PRIVATE)", re.IGNORECASE
+)
 
 ENV_REF_PATTERNS = [
     re.compile(r"os\.environ\[[\'\"](\w+)[\'\"]\]"),
@@ -13,6 +19,7 @@ ENV_REF_PATTERNS = [
 
 CODE_EXTENSIONS = {".py", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"}
 SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build"}
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB — skip anything larger (generated/minified/binary)
 
 
 def find_referenced_vars(project_path: Path) -> set[str]:
@@ -25,6 +32,8 @@ def find_referenced_vars(project_path: Path) -> set[str]:
         if path.suffix not in CODE_EXTENSIONS:
             continue
         try:
+            if path.stat().st_size > MAX_FILE_SIZE:
+                continue
             text = path.read_text(errors="ignore")
         except OSError:
             continue
@@ -84,12 +93,19 @@ def run(project_path: str, interactive: bool) -> None:
         return
 
     print()
-    print("Enter values (leave blank to skip):")
+    print("Enter values (leave blank to skip). Values that look like secrets are masked:")
     new_lines = []
     if (project / ".env").exists():
         new_lines.append((project / ".env").read_text().rstrip("\n"))
     for var in missing:
-        val = input(f"  {var}=")
+        prompt = f"  {var}="
+        if SECRET_NAME_PATTERN.search(var):
+            val = getpass.getpass(prompt)
+        else:
+            val = input(prompt)
+        if "\n" in val or "\r" in val:
+            print(f"    Skipping {var}: value contains a newline, which would corrupt .env.")
+            continue
         if val:
             new_lines.append(f"{var}={val}")
     (project / ".env").write_text("\n".join(l for l in new_lines if l) + "\n")

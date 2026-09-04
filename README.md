@@ -37,11 +37,19 @@ devkit deadcode --path ./src
 ```
 
 ### `devkit logwatch`
-Tails a log file, flags error-like lines (`ERROR`, `CRITICAL`, `Traceback`, `panic:`, etc.), and gives you a quick breakdown. With `--ai` and an `ANTHROPIC_API_KEY` set, it asks Claude for a plain-English read on what's likely wrong.
+Tails a log file, flags error-like lines (`ERROR`, `CRITICAL`, `Traceback`, `panic:`, etc.), and gives you a quick breakdown. With `--ai` and a `GROQ_API_KEY` set, it asks [Groq](https://console.groq.com) (free tier) for a plain-English read on what's likely wrong.
+
+Likely secrets (API keys, tokens, emails, etc.) are redacted from the excerpt before it's sent, and you'll be asked to confirm before anything is sent (skip with `-y/--yes`).
+
+Get a free key at [console.groq.com/keys](https://console.groq.com/keys), then:
+```bash
+export GROQ_API_KEY=your_key_here
+```
 
 ```bash
 devkit logwatch app.log
 devkit logwatch app.log -n 2000 --ai
+devkit logwatch app.log --ai --model llama-3.3-70b-versatile
 ```
 
 ### `devkit portfolio`
@@ -55,6 +63,5 @@ Set `GITHUB_TOKEN` to avoid GitHub's low unauthenticated rate limit.
 
 ## Notes
 
-- `logwatch --ai` and `portfolio` make outbound API calls (Anthropic / GitHub respectively) — everything else runs fully offline.
+- `logwatch --ai` and `portfolio` make outbound API calls (Groq / GitHub respectively) — everything else runs fully offline.
 - `deadcode` and `envcheck`'s code-scanning are intentionally simple (regex/AST based) to keep this a weekend build, not a static-analysis platform.
-# Dev-Toolkit

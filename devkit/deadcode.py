@@ -4,11 +4,17 @@ from pathlib import Path
 
 SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build"}
 IGNORE_NAMES = {"__init__", "__main__", "main", "setup"}
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB — skip anything larger (generated/vendored/binary)
 
 
 def _iter_py_files(project_path: Path):
     for path in project_path.rglob("*.py"):
         if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        try:
+            if path.stat().st_size > MAX_FILE_SIZE:
+                continue
+        except OSError:
             continue
         yield path
 
