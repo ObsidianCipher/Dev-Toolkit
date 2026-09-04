@@ -57,3 +57,4 @@ Set `GITHUB_TOKEN` to avoid GitHub's low unauthenticated rate limit.
 
 - `logwatch --ai` and `portfolio` make outbound API calls (Anthropic / GitHub respectively) — everything else runs fully offline.
 - `deadcode` and `envcheck`'s code-scanning are intentionally simple (regex/AST based) to keep this a weekend build, not a static-analysis platform.
+# Dev-Toolkit
